@@ -1,18 +1,19 @@
 from django.db import models
-
+from django.contrib.auth.models import UserManager,User, PermissionsMixin, AbstractBaseUser
+from django.conf import settings
 # Create your models here.
 
 # Пациенты
 class Patient(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, primary_key=True)
     name = models.CharField(max_length=50)
     surname = models.CharField(max_length=50)
     patronymic = models.CharField(max_length=50)
     birth_date = models.DateField()
-    telephone = models.CharField(max_length=15)
-    password = models.CharField(max_length=500)
 
-    class Meta: 
-        verbose_name_plural = "Patients" 
+    class Meta:
+        db_table = 'patients'
+        verbose_name_plural = "Пациенты" 
         managed = True
 
     def __str__(self):
@@ -21,8 +22,9 @@ class Patient(models.Model):
 class Specialization(models.Model):
     name = models.CharField(max_length=100)
 
-    class Meta: 
-        verbose_name_plural = "Specializations" 
+    class Meta:
+        db_table = 'specializations'
+        verbose_name_plural = "Специализации" 
         managed = True
         
     def __str__(self):
@@ -30,17 +32,17 @@ class Specialization(models.Model):
 
 # Врачи
 class Doctor(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, primary_key=True)
     specialization = models.ForeignKey(Specialization, on_delete=models.PROTECT)
     name = models.CharField(max_length=50)
     surname = models.CharField(max_length=50)
     patronymic = models.CharField(max_length=50)
     image_path = models.TextField()
-    rating = models.IntegerField()
-    telephone = models.CharField(max_length=15)
-    password = models.CharField(max_length=500)
+    rating = models.IntegerField(null=True)
 
-    class Meta: 
-        verbose_name_plural = "Doctors" 
+    class Meta:
+        db_table = 'doctors'
+        verbose_name_plural = "Врачи" 
         managed = True
 
     def __str__(self):
@@ -51,8 +53,9 @@ class Diagnose(models.Model):
     name = models.CharField(max_length=100)
     decription = models.TextField()
 
-    class Meta: 
-        verbose_name_plural = "Diagnosises" 
+    class Meta:
+        db_table = 'diagnoses'
+        verbose_name_plural = "Диагнозы" 
         managed = True
 
     def __str__(self):
@@ -63,6 +66,14 @@ class Procedure(models.Model):
     name = models.CharField(max_length=100)
     description = models.TextField()
     price = models.BigIntegerField()
+
+    class Meta:
+        db_table = 'procedures'
+        verbose_name_plural = "Процедуры" 
+        managed = True
+
+    def __str__(self):
+        return self.name
 
 # Лечение
 class Treatment(models.Model):
@@ -75,6 +86,14 @@ class Treatment(models.Model):
     date_appointment = models.DateTimeField()
     description = models.TextField()
 
+    class Meta:
+        db_table = 'treatments'
+        verbose_name_plural = "Лечения" 
+        managed = True
+
+    def __str__(self):
+        return self.name
+
 # Лекарства
 class Medicament(models.Model):
     name = models.CharField(max_length=100)
@@ -83,8 +102,9 @@ class Medicament(models.Model):
     contraindications = models.TextField()
     production_date = models.DateField()
     
-    class Meta: 
-        verbose_name_plural = "Medicaments" 
+    class Meta:
+        db_table = 'medicaments'
+        verbose_name_plural = "Медикаменты" 
         managed = True
 
     def __str__(self):
@@ -95,8 +115,9 @@ class TreatmentMedicament(models.Model):
     treatment = models.ForeignKey(Treatment, on_delete=models.CASCADE)
     medicament = models.ForeignKey(Medicament, on_delete=models.CASCADE)
 
-    class Meta: 
-        verbose_name_plural = "Treatments with medicaments" 
+    class Meta:
+        db_table = 'treatmentmedicament'
+        verbose_name_plural = "Лечения и их медикаменты" 
         managed = True
         constraints = [
             models.UniqueConstraint(fields=['treatment', 'medicament'], name='unique_medicaments_treatment')
@@ -122,17 +143,22 @@ class Record(models.Model):
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
     treatment = models.ForeignKey(Treatment, null=True, on_delete=models.PROTECT)
     status = models.IntegerField(choices=STATUS_CHOICES)
-    duration = models.DecimalField(max_digits=4, decimal_places=2)
     start_time = models.DateTimeField(null=True)
     end_time = models.DateTimeField(null=True)
 
-# Доктора и проводимые ими процедуры
+    class Meta:
+        db_table = 'records'
+        verbose_name_plural = "Записи" 
+        managed = True
+
+# Врачи и проводимые ими процедуры
 class DoctorsProcedures(models.Model):
     doctor = models.ForeignKey(Doctor, on_delete=models.CASCADE)
     procedure = models.ForeignKey(Procedure, on_delete=models.CASCADE)
 
-    class Meta: 
-        verbose_name_plural = "Doctors with Procedures" 
+    class Meta:
+        db_table = 'doctorprocedure'
+        verbose_name_plural = "Врачи и процедуры" 
         managed = True
         constraints = [
             models.UniqueConstraint(fields=['doctor', 'procedure'], name='unique_doctor_procedure')
@@ -152,8 +178,48 @@ class Snapshot(models.Model):
     type = models.IntegerField(choices=SNAPSHOT_TYPE)
     record = models.ForeignKey(Record, on_delete=models.CASCADE)
 
+    class Meta:
+        db_table = 'snapshots'
+        verbose_name_plural = "Снимки" 
+        managed = True
+
+    def __str__(self):
+        return f"{self.doctor}-{self}"
 
 # Счета для оплаты
 class Account(models.Model):
     amount = models.BigIntegerField()
     treatment = models.OneToOneField(Treatment, on_delete=models.CASCADE)
+
+    class Meta:
+        db_table = 'accounts'
+        verbose_name_plural = "Счета" 
+        managed = True
+
+class NewUserManager(UserManager):
+    def create_user(self,email,password=None, **extra_fields):
+        if not email:
+            raise ValueError('User must have an email address')
+        
+        email = self.normalize_email(email) 
+        user = self.model(email=email, **extra_fields) 
+        user.set_password(password)
+        user.save(using=self.db)
+        return user
+
+class User(AbstractBaseUser, PermissionsMixin):
+    email = models.EmailField(("email адрес"), unique=True)
+    phone_number = models.CharField(unique=True, max_length=15, verbose_name="Телефон")
+    password = models.CharField(max_length=50, verbose_name="Пароль")    
+    is_admin = models.BooleanField(default=False, verbose_name="Является ли пользователь админом?")
+    is_doctor = models.BooleanField(default=False, verbose_name="Является ли пользователь врачом?")
+    is_patient = models.BooleanField(default=False, verbose_name="Является ли пользователь пациентом?")
+
+    USERNAME_FIELD = 'email'
+
+    objects =  NewUserManager()
+
+    class Meta:
+        db_table = 'users'
+        verbose_name_plural = "Пользователи" 
+        managed = True

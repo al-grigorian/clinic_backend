@@ -27,6 +27,10 @@ DEBUG = True
 
 ALLOWED_HOSTS = []
 
+REDIS_HOST = '127.0.0.1'
+REDIS_PORT = 6379
+
+AUTH_USER_MODEL = "clinic_app.User"
 
 # Application definition
 
@@ -37,7 +41,9 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'clinic_app'
+    'clinic_app',
+    'rest_framework',
+    'drf_yasg',
 ]
 
 MIDDLEWARE = [
