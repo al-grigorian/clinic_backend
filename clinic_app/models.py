@@ -38,7 +38,7 @@ class Doctor(models.Model):
     surname = models.CharField(max_length=50)
     patronymic = models.CharField(max_length=50)
     image_path = models.TextField()
-    rating = models.IntegerField(null=True)
+    rating = models.IntegerField(default=0)
 
     class Meta:
         db_table = 'doctors'
@@ -82,8 +82,12 @@ class Treatment(models.Model):
         (2, 'Завершено'),
     )
 
+    doctor = models.ForeignKey(Doctor, blank=True, null=True, on_delete=models.CASCADE)
+    patient = models.ForeignKey(Patient, blank=True, null=True, on_delete=models.CASCADE)
+    diagnose = models.ForeignKey(Diagnose, blank=True, null=True,  on_delete=models.CASCADE)
     status = models.IntegerField(choices=STATUS_TREATMENT)
-    date_appointment = models.DateTimeField()
+    date_creation = models.DateTimeField()
+    date_completion = models.DateTimeField(null=True)
     description = models.TextField()
 
     class Meta:
@@ -131,14 +135,11 @@ class Record(models.Model):
     STATUS_CHOICES = ( 
         (1, 'Ожидание подтверждения'),
         (2, 'Подтверждено'),
-        (3, 'В процессе'),
-        (4, 'Отменено'),
-        (5, 'Перенесено'),
-        (6, 'Завершено'),
+        (3, 'Отменено'),
+        (4, 'Завершено')
     )
 
     procedure = models.ForeignKey(Procedure, on_delete=models.CASCADE)
-    diagnose = models.ForeignKey(Diagnose, null=True, on_delete=models.CASCADE)
     doctor = models.ForeignKey(Doctor, on_delete=models.CASCADE)
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
     treatment = models.ForeignKey(Treatment, null=True, on_delete=models.PROTECT)
@@ -210,7 +211,7 @@ class NewUserManager(UserManager):
 class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(("email адрес"), unique=True)
     phone_number = models.CharField(unique=True, max_length=15, verbose_name="Телефон")
-    password = models.CharField(max_length=50, verbose_name="Пароль")    
+    password = models.CharField(max_length=150, verbose_name="Пароль")    
     is_admin = models.BooleanField(default=False, verbose_name="Является ли пользователь админом?")
     is_doctor = models.BooleanField(default=False, verbose_name="Является ли пользователь врачом?")
     is_patient = models.BooleanField(default=False, verbose_name="Является ли пользователь пациентом?")
@@ -223,3 +224,14 @@ class User(AbstractBaseUser, PermissionsMixin):
         db_table = 'users'
         verbose_name_plural = "Пользователи" 
         managed = True
+
+class Rating(models.Model):
+    doctor = models.ForeignKey(Doctor, on_delete=models.CASCADE, related_name='ratings')
+    patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
+    score = models.IntegerField()
+
+    class Meta:
+        db_table = 'ratings'
+        unique_together = ('doctor', 'patient')  # Один пациент может оставить только одну оценку для одного врача
+        managed = True
+        verbose_name_plural = "Рейтинги"

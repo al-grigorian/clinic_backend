@@ -44,22 +44,36 @@ urlpatterns = [
     
     # GET
     path('doctors/', views.get_doctors, name='doctors-list'), # Получение списка всех врачей
-    path('patients/', views.get_patients, name='patients-list'), # Получение списка всех пациентов
     path('procedures/', views.get_procedures, name='procedures-list'), # Получение списка всех процедур
-    path('specializations/', views.get_specializations, name='specializations-list'), # Получение списка всех специализаций
     path('doctors/by-procedure/<int:procedure_id>/', views.get_doctors_by_procedure, name='get_doctors_by_procedure'), # Получение списка врачей, выполняющих конкретную выбранную процедуру
-    path('records/by-patient/<int:patient_id>/', views.get_records_by_patient, name='get_records_by_patient'), # Получение списка записей конкретного пациента
-    path('records_by_doctor/<int:doctor_id>/', views.get_records_by_doctor, name='get_records_by_doctor'), # Получение списка записей конкретного врача
-    path('treatments_by_patient/<int:patient_id>/', views.get_treatments_by_patient, name='get_treatments_by_patient'), # Получение списка лечений конкретного пациента
-    path('medicaments/by-treatment/<int:treatment_id>/', views.get_medicaments_by_treatment, name='get_medicaments_by_treatment'),  # Получение списка медикаментов, относящихся к конкретному лечению
-    
+
+    #path('specializations/', views.get_specializations, name='specializations-list'), # Получение списка всех специализаций
+    #path('procedures/<int:procedure_id>/', views.get_procedure_by_id, name='get-procedure-by-id'), # Получение процедуры по ID
+    #path('doctors/<int:doctor_id>/', views.get_doctor_by_id, name='get-doctor-by-id'), # Получение врача по ID
+    #path('patients/', views.get_patients, name='patients-list'), # Получение списка всех пациентов
+
+    path('records/by-admin/', views.get_pending_records, name='get_pending_records'), # Получение списка записей со статусом "Ожидание подтверждения"
+    path('records/by-patient/', views.get_records_by_patient, name='get_records_by_patient'), # Получение списка записей пациента со статусом "Подтверждено" и "Ожидание подтверждения"
+    path('records/by_doctor/', views.get_records_by_doctor, name='get_records_by_doctor'), # Получение списка записей врача со статусом "Ожидание подтверждения"
+    path('treatments/by_patient/', views.get_treatments_by_patient, name='get_treatments_by_patient'), # Получение списка лечений конкретного пациента
+    path('medicaments/by-patient/', views.get_medicaments_by_patient, name='get_medicaments_by_treatment'),  # Получение списка медикаментов пациента
+    path('patients/snapshots/', views.get_patient_snapshots, name='get-patient-snapshots'), # Получение списка рентген снимов пациента
+    # получение лечений врача со статусом "В процессе"
+
     # PUT
     path('records/update-by-doctor/<int:record_id>/', views.update_record_by_doctor, name='update_record_by_doctor'),  # Изменение статуса записи врачом на "Завершено"
-    path('records/update-by-admin/<int:record_id>/', views.update_record_by_admin, name='update_record_by_admin'),  # Обновление статуса заявки админом на "Подтверждено"
+    path('records/update-by-admin/<int:record_id>/', views.update_record_by_admin, name='update_record_by_admin'),  # Изменение статуса записи админом на "Подтверждено"
+    path('records/cancel/<int:record_id>', views.cancel_record_by_patient, name='cancel-record'), # Изменение статуса записи пациентом на "Отменено"
+    path('treatments/update-by-doctor/<int:treatment_id>', views.update_treatment_by_doctor, name='update_treatment_by_doctor'), # Изменение статуса лечения врачом на "Завершено"
+    path('records/reschedule/<int:record_id>/', views.reschedule_record, name='reschedule-record'), # Перенос записи на другое время
 
     # POST
-
-    # DELETE
-    
-    
+    path('api-auth/', include('rest_framework.urls', namespace='rest_framework')),
+    path('login/',  views.login_view, name='login'), # Авторизация
+    path('logout/', views.logout_view, name='logout'), # Выход
+    path('create/', views.create, name='create'), # Регистрация
+    path('create_doctor/', views.create_doctor, name='create-doctor'), # Создание доктора
+    path('doctors/rate/', views.update_doctor_rating, name='update-doctor-rating'),  # Добавление оценки доктору
+    path('create_record/', views.create_record, name='create-record'), # Создание новой записи
+    path('create_treatment/', views.create_treatment, name='create-treatment') # Создание нового лечения
 ]
