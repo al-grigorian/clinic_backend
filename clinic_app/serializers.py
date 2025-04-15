@@ -1,6 +1,57 @@
 from .models import *
 from rest_framework import serializers
+from .models import Record, Patient, Doctor, Procedure
+
+
+class LoginSuccessResponseSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    email = serializers.EmailField()
+    phone_number = serializers.CharField()
+    is_superuser = serializers.BooleanField()
+    is_admin = serializers.BooleanField()
+    is_doctor = serializers.BooleanField()
+    is_patient = serializers.BooleanField()
+
+
+class LoginSuccessResponseSerializer2(serializers.Serializer):
+    message = serializers.CharField()
+    token = serializers.CharField()
+
+
+class SimpleTreatmentSerializer(serializers.ModelSerializer):
+    doctor = serializers.SerializerMethodField()
+    patient = serializers.SerializerMethodField()
+    diagnose = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Treatment
+        fields = '__all__'  # ['id', 'doctor', 'patient', 'diagnose', 'status', 'date_creation', 'date_completion', 'description']
+
+    def get_doctor(self, obj):
+        return f"{obj.doctor.surname} {obj.doctor.name} {obj.doctor.patronymic}"
+
+    def get_patient(self, obj):
+        return f"{obj.patient.surname} {obj.patient.name} {obj.patient.patronymic}"
+
+    def get_diagnose(self, obj):
+        return obj.diagnose.name if obj.diagnose else None
     
+
+class SimpleRecordSerializer(serializers.ModelSerializer):
+    procedure = serializers.CharField(source='procedure.name')
+    doctor = serializers.SerializerMethodField()
+    patient = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Record
+        fields = '__all__'#['id', 'procedure', 'doctor', 'patient', 'treatment', 'status', 'start_time', 'end_time']
+
+    def get_doctor(self, obj):
+        return f"{obj.doctor.surname} {obj.doctor.name} {obj.doctor.patronymic}"
+
+    def get_patient(self, obj):
+        return f"{obj.patient.surname} {obj.patient.name} {obj.patient.patronymic}"
+
 class ProcedureSerializer(serializers.ModelSerializer):
     class Meta:
         model = Procedure
@@ -29,6 +80,7 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['id', 'email', 'phone_number', 'password', 'is_admin', 'is_doctor', 'is_patient']
+
 
 class PatientSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)

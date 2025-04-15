@@ -48,11 +48,31 @@ def get_doctors(request, format=None):
     return Response(serializer.data)
 
 
-# GET - список всех процедур
+# GET - список всех процедур с фильтром
 @swagger_auto_schema(
     tags=["GET-запросы"], 
     method='get', 
     operation_summary="Получение списка всех процедур с фильтром",
+    manual_parameters=[
+        openapi.Parameter(
+            name='search',
+            in_=openapi.IN_QUERY,
+            description="Поиск по названию процедуры",
+            type=openapi.TYPE_STRING
+        ),
+        openapi.Parameter(
+            name='min_price',
+            in_=openapi.IN_QUERY,
+            description="Минимальная цена",
+            type=openapi.TYPE_INTEGER
+        ),
+        openapi.Parameter(
+            name='max_price',
+            in_=openapi.IN_QUERY,
+            description="Максимальная цена",
+            type=openapi.TYPE_INTEGER
+        )
+    ],
     responses={200: ProcedureSerializer(many=True)})
 @api_view(['GET'])
 def get_procedures(request, format=None):
@@ -121,19 +141,23 @@ def get_specializations(request, format=None):
 @swagger_auto_schema(
     tags=["GET-запросы"],
     method='get',
-    operation_summary="Получение списка всех записей со статусом 'Ожидание подтверждения'",
-    responses={200: RecordSerializer(many=True)})
+    operation_summary="Получение админом списка всех записей со статусом 'Ожидание подтверждения'",
+    responses={200: SimpleRecordSerializer(many=True)})
 @api_view(['GET'])
 def get_pending_records(request, format=None):
     # Получаем все записи со статусом "Ожидание подтверждения"
-    pending_records = Record.objects.filter(status=1).select_related('patient', 'doctor', 'procedure')
+    pending_records = Record.objects.filter(status=1)
 
-    serializer = RecordSerializer(pending_records, many=True)
+    serializer = SimpleRecordSerializer(pending_records, many=True)
     return Response(serializer.data)
 
 
 # GET - список врачей, проводящих конкретную процедуру
-@swagger_auto_schema(tags=["GET-запросы"], method='get', operation_summary="Получение списка врачей, проводящих конкретную процедуру")
+@swagger_auto_schema(
+    tags=["GET-запросы"], 
+    method='get', 
+    operation_summary="Получение списка врачей, проводящих конкретную процедуру",
+    responses={200: DoctorSerializer(many=True)})
 @api_view(['GET'])
 def get_doctors_by_procedure(request, procedure_id, format=None):
     try:
@@ -149,64 +173,171 @@ def get_doctors_by_procedure(request, procedure_id, format=None):
     return Response(serializer.data)
 
 
-# GET - список всех записей конкретного пациента со статусом "П"
-@swagger_auto_schema(tags=["GET-запросы"], method='get', operation_summary="Получение списка всех записей конкретного пациента")
+# GET - список всех записей пациента с фильтром по статусу, если статус не передан в параметре, по умолчанию выведет список записей со статусом 'Ожидание подтверждения' и 'Подтверждено'
+@swagger_auto_schema(
+    tags=["GET-запросы"], 
+    method='get', 
+    operation_summary=("Получение списка записей пациента с фильтром по статусу. " 
+                       "Если статус не передан в параметре, выведет записи со статусом 'Ожидание подтверждения' (status=1) и 'Подтверждено' (status=2). "
+                        "Список сортируется по полю status по возрастанию"),
+    manual_parameters=[
+        openapi.Parameter(
+            'status',
+            openapi.IN_QUERY,
+            description="Статус записи",
+            type=openapi.TYPE_INTEGER,
+            required=False
+        )
+    ],
+    responses={
+        200: SimpleRecordSerializer(many=True),
+        400: "Bad Request - Пользователь не является пациентом",
+        403: "Forbidden - Сессия не найдена",
+        404: "Not Found - Пользователь не найден"
+    }
+)
 @api_view(['GET'])
-def get_records_by_patient(request, patient_id, format=None):
+def get_records_by_patient(request, format=None):
+    if "session_id" in request.COOKIES:
+        ssid = request.COOKIES["session_id"]
+    else:
+        return HttpResponseForbidden('Сессия не найдена')
+
     try:
-        patient = Patient.objects.get(pk=patient_id)
-    except Patient.DoesNotExist:
-        return Response("Пациент не найден.", status=status.HTTP_404_NOT_FOUND)
+        email = session_storage.get(ssid).decode('utf-8')
+        user = User.objects.get(email=email)
+    except (User.DoesNotExist, AttributeError):
+        return Response({"error": "Пользователь не найден."}, status=status.HTTP_404_NOT_FOUND)
 
-    # Получаем все записи, связанные с этим пациентом, исключая статусы "отменено" и "завершено"
-    records = Record.objects.filter(patient=patient).exclude(status__in=[3, 4])
+    if not user.is_patient:
+        return Response({"error": "Пользователь не пациент."}, status=status.HTTP_400_BAD_REQUEST)
 
-    serializer = RecordSerializer(records, many=True)
+    patient = Patient.objects.get(user=user)
+
+    # Получаем статус из запроса или используем значения по умолчанию
+    status_param = request.query_params.get('status')
+    if status_param:
+        records = Record.objects.filter(patient=patient, status=status_param).order_by('status')
+    else:
+        records = Record.objects.filter(patient=patient, status__in=[1, 2]).order_by('status')
+
+    serializer = SimpleRecordSerializer(records, many=True)
     return Response(serializer.data)
 
 
-# GET - список всех записей конкретного врача
-@swagger_auto_schema(tags=["GET-запросы"], method='get', operation_summary="Получение списка всех записей конкретного врача")
+# GET - список всех записей врача со статусом 'Подтверждено'
+@swagger_auto_schema(
+    tags=["GET-запросы"], 
+    method='get', 
+    operation_summary="Получение списка всех записей врача со статусом 'Подтверждено' (status=2)",
+    responses={
+        200: SimpleRecordSerializer(many=True),
+        400: "Bad Request - Пользователь не является врачом.",
+        403: "Forbidden - Сессия не найдена.",
+        404: "Not Found - Пользователь не найден."
+    })
 @api_view(['GET'])
-def get_records_by_doctor(request, doctor_id, format=None):
+def get_records_by_doctor(request, format=None):
+    if "session_id" in request.COOKIES:
+        ssid = request.COOKIES["session_id"]
+    else:
+        return HttpResponseForbidden('Сессия не найдена')
+
     try:
-        doctor = Doctor.objects.get(pk=doctor_id)
-    except Doctor.DoesNotExist:
-        return Response("Врач не найден.", status=status.HTTP_404_NOT_FOUND)
+        email = session_storage.get(ssid).decode('utf-8')
+        user = User.objects.get(email=email)
+    except (User.DoesNotExist, AttributeError):
+        return Response({"error": "Пользователь не найден."}, status=status.HTTP_404_NOT_FOUND)
 
-    # Получаем все записи, связанные с этим врачом
-    records = Record.objects.filter(doctor=doctor)
+    if not user.is_doctor:
+        return Response({"error": "Пользователь не врач."}, status=status.HTTP_400_BAD_REQUEST)
 
-    serializer = RecordSerializer(records, many=True)
+    doctor = Doctor.objects.get(user=user)
+
+    # Получаем все записи, связанные с этим врачом, со статусом "Подтверждено"
+    records = Record.objects.filter(doctor=doctor, status=2)
+
+    serializer = SimpleRecordSerializer(records, many=True)
     return Response(serializer.data)
 
 
-# GET - список всех лечений конкретного пациента
-@swagger_auto_schema(tags=["GET-запросы"], method='get', operation_summary="Получение списка всех лечений конкретного пациента")
+# GET - список всех лечений пациента с сортировкой по статусу по возрастанию
+@swagger_auto_schema(
+    tags=["GET-запросы"], 
+    method='get', 
+    operation_summary="Получение списка всех лечений пациента с сортировкой по статусу по возрастанию",
+    responses={
+        200: SimpleTreatmentSerializer(many=True),
+        400: "Bad Request - Пользователь не является пациентом.",
+        403: "Forbidden - Сессия не найдена.",
+        404: "Not Found - Пользователь не найден."})
 @api_view(['GET'])
-def get_treatments_by_patient(request, patient_id, format=None):
-    try:
-        patient = Patient.objects.get(pk=patient_id)
-    except Patient.DoesNotExist:
-        return Response("Пациент не найден.", status=status.HTTP_404_NOT_FOUND)
+def get_treatments_by_patient(request, format=None):
+    if "session_id" in request.COOKIES:
+        ssid = request.COOKIES["session_id"]
+    else:
+        return HttpResponseForbidden('Сессия не найдена')
 
-    # Получаем все лечения, связанные с этим пациентом
-    treatments = Treatment.objects.filter(record__patient=patient).distinct()
+    try:
+        email = session_storage.get(ssid).decode('utf-8')
+        user = User.objects.get(email=email)
+    except (User.DoesNotExist, AttributeError):
+        return Response({"error": "Пользователь не найден."}, status=status.HTTP_404_NOT_FOUND)
+
+    if not user.is_patient:
+        return Response({"error": "Пользователь не пациент."}, status=status.HTTP_400_BAD_REQUEST)
+
+    patient = Patient.objects.get(user=user)
+    treatments = Treatment.objects.filter(patient=patient).order_by('status')
 
     serializer = TreatmentSerializer(treatments, many=True)
-    return Response(serializer.data)
+    return Response(serializer.data, status=status.HTTP_200_OK)
 
 
-# GET - список медикаментов, относящихся к конкретному лечению
+# GET - список всех лечений врача со статусом 'В процессе' (status=1)
+@swagger_auto_schema(
+    tags=["GET-запросы"],
+    method='get',
+    operation_summary="Получение списка всех лечений врача со статусом 'В процессе' (status=1)",
+    responses={
+        200: SimpleTreatmentSerializer(many=True),
+        400: "Bad Request - Пользователь не является врачом.",
+        403: "Forbidden - Сессия не найдена.",
+        404: "Not Found - Пользователь не найден."})
+@api_view(['GET'])
+def get_treatments_by_doctor(request, format=None):
+    if "session_id" in request.COOKIES:
+        ssid = request.COOKIES["session_id"]
+    else:
+        return HttpResponseForbidden('Сессия не найдена')
+
+    try:
+        email = session_storage.get(ssid).decode('utf-8')
+        user = User.objects.get(email=email)
+    except (User.DoesNotExist, AttributeError):
+        return Response({"error": "Пользователь не найден."}, status=status.HTTP_404_NOT_FOUND)
+
+    if not user.is_doctor:
+        return Response({"error": "Пользователь не врач."}, status=status.HTTP_400_BAD_REQUEST)
+
+    doctor = Doctor.objects.get(user=user)
+    treatments = Treatment.objects.filter(doctor=doctor, status=1)  # 1 соответствует статусу "В процессе"
+
+    serializer = TreatmentSerializer(treatments, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+
+# GET - список медикаментов пациента
 @swagger_auto_schema(
     tags=["GET-запросы"], 
     method='get', 
     operation_summary="Получение списка медикаментов пациента",
     responses={
         200: MedicamentSerializer(many=True),
-        400: 'Bad Request',
-        403: 'Forbidden',
-        404: 'Not Found',
+        400: 'Bad Request - Пользователь не пациент',
+        403: 'Forbidden - Сессия не найдена',
+        404: 'Not Found - Пациент не найден',
 })
 @api_view(['GET'])
 def get_medicaments_by_patient(request, format=None):
@@ -307,7 +438,10 @@ def update_record_by_doctor(request, record_id):
 
 
 # PUT - изменение админом статуса записи на "Подтверждено"
-@swagger_auto_schema(tags=["PUT-запросы"], method='put', operation_summary="Изменение админом статуса записи на 'Подтверждено'")
+@swagger_auto_schema(
+    tags=["PUT-запросы"], 
+    method='put', 
+    operation_summary="Изменение админом статуса записи на 'Подтверждено'")
 @api_view(['PUT'])
 @permission_classes([AllowAny])
 def update_record_by_admin(request, record_id):
@@ -432,7 +566,7 @@ def reschedule_record(request, record_id):
 @swagger_auto_schema(tags=["POST-запросы"], method='post', request_body=UserSerializer, operation_summary="Регистрация пациента и администратора")
 @api_view(['POST'])
 @permission_classes([AllowAny])
-def create(request):
+def create_user(request):
     if User.objects.filter(email=request.data['email']).exists():
         return Response({'status': 'Exist'}, status=400)
     user_data = {
@@ -519,11 +653,20 @@ def create_doctor(request):
         return response
     return Response({'status': 'Error', 'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
+
 # Вход в профиль
-@swagger_auto_schema(tags=["POST-запросы"], method='post', request_body=LoginSerializer, operation_summary="Вход в профиль")
+@swagger_auto_schema(
+    tags=["POST-запросы"],
+    method='post',
+    request_body=LoginSerializer,
+    operation_summary="Вход в профиль",
+    responses={
+        201: LoginSuccessResponseSerializer
+    }
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
-def login_view(request):
+def login(request):
     serializer = LoginSerializer(data=request.data)
     if serializer.is_valid():  # Проверка валидности данных
         username = serializer.validated_data["email"]
@@ -554,7 +697,7 @@ def login_view(request):
 @swagger_auto_schema(tags=["POST-запросы"], method='post', operation_summary="Выход из профиля")
 @api_view(['POST'])
 @permission_classes([IsAuth])
-def logout_view(request):
+def logout(request):
     ssid = request.COOKIES["session_id"]
     print(ssid)
     if session_storage.exists(ssid):
@@ -571,7 +714,6 @@ def logout_view(request):
         required=['rating', 'patient_id', 'doctor_id'],
         properties={
             'rating': openapi.Schema(type=openapi.TYPE_INTEGER, description='Новый рейтинг врача (от 1 до 5)'),
-            'patient_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID пациента'),
             'doctor_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID врача'),
         },
     ),
@@ -585,19 +727,31 @@ def logout_view(request):
 @permission_classes([AllowAny])
 def update_doctor_rating(request, doctor_id):
     new_rating = request.data.get('rating')
-    patient_id = request.data.get('patient_id')
     doctor_id = request.data.get('doctor_id')
 
-    if not new_rating or not patient_id:
-        return Response({"error": "Missing rating or patient_id."}, status=status.HTTP_400_BAD_REQUEST)
+    if not new_rating or not doctor_id:
+        return Response({"error": "Missing rating or doctor_id."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if "session_id" in request.COOKIES:
+        ssid = request.COOKIES["session_id"]
+    else:
+        return HttpResponseForbidden('Сессия не найдена')
+    
+    try:
+        email = session_storage.get(ssid).decode('utf-8')
+        user = User.objects.get(email=email)
+    except (User.DoesNotExist, AttributeError):
+        return Response({"error": "Пользователь не найден."}, status=status.HTTP_404_NOT_FOUND)
+
+    if not user.is_patient:
+        return Response({"error": "Пользователь не пациент."}, status=status.HTTP_400_BAD_REQUEST)
+
+    patient = Patient.objects.get(user=user)
 
     try:
         doctor = Doctor.objects.get(pk=doctor_id)
-        patient = Patient.objects.get(pk=patient_id)
     except Doctor.DoesNotExist:
         return Response({"error": "Doctor not found."}, status=status.HTTP_404_NOT_FOUND)
-    except Patient.DoesNotExist:
-        return Response({"error": "Patient not found."}, status=status.HTTP_404_NOT_FOUND)
 
     if 1 <= new_rating <= 5:
         # Создаем новую оценку
@@ -613,17 +767,19 @@ def update_doctor_rating(request, doctor_id):
         return Response({"error": "Rating must be between 1 and 5."}, status=status.HTTP_400_BAD_REQUEST)
 
 
-# POST - создание новой записи
-@swagger_auto_schema(tags=["POST-запросы"], method='post', operation_summary="Создание новой записи",
+# POST - создание новой записи пациентом
+@swagger_auto_schema(
+    tags=["POST-запросы"],
+    method='post',
+    operation_summary="Создание новой записи пациентом",
     request_body=openapi.Schema(
         type=openapi.TYPE_OBJECT,
-        required=['doctor_id', 'procedure_id', 'start_time', 'patient_id'],
+        required=['doctor_id', 'procedure_id', 'start_time'],
         properties={
             'treatment_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID лечения'),
             'doctor_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID доктора'),
             'procedure_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID процедуры'),
             'start_time': openapi.Schema(type=openapi.TYPE_INTEGER, description='Время начала'),
-            'patient_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID пациента'),
         },
     ),
     responses={
@@ -640,14 +796,35 @@ def create_record(request, format=None):
     doctor_id = request.data.get('doctor_id')
     procedure_id = request.data.get('procedure_id')
     start_time = request.data.get('start_time')
-    patient_id = request.data.get('patient_id')
 
     if not treatment_id and not doctor_id:
         return Response("Необходимо передать либо treatment_id, либо doctor_id.", status=status.HTTP_400_BAD_REQUEST)
-    
-    if not procedure_id or not start_time or not patient_id:
-            return Response("Необходимые данные отсутствуют.", status=status.HTTP_400_BAD_REQUEST)
-        
+
+    if not procedure_id or not start_time:
+        return Response("Необходимые данные отсутствуют.", status=status.HTTP_400_BAD_REQUEST)
+
+    # Получаем session_id из cookie
+    session_id = request.COOKIES.get('session_id')
+    if not session_id:
+        return Response("Отсутствует session_id в cookie.", status=status.HTTP_400_BAD_REQUEST)
+
+    # Получаем email пользователя из session_storage
+    user_email = session_storage.get(session_id)
+    if not user_email:
+        return Response("Не удалось определить пользователя по session_id.", status=status.HTTP_400_BAD_REQUEST)
+
+    # Получаем объект пользователя
+    try:
+        user = User.objects.get(email=user_email)
+    except User.DoesNotExist:
+        return Response("Пользователь не найден.", status=status.HTTP_404_NOT_FOUND)
+
+    # Получаем объект пациента
+    try:
+        patient = Patient.objects.get(user=user)
+    except Patient.DoesNotExist:
+        return Response("Пациент не найден.", status=status.HTTP_404_NOT_FOUND)
+
     try:
         # Получаем объект процедуры
         procedure = Procedure.objects.get(pk=procedure_id)
@@ -655,12 +832,10 @@ def create_record(request, format=None):
         if treatment_id:
             # Получаем объект лечения и доктора из него
             treatment = Treatment.objects.get(pk=treatment_id)
-            patient = treatment.patient
             doctor = treatment.doctor
         elif doctor_id:
             # Получаем объект доктора
             doctor = Doctor.objects.get(pk=doctor_id)
-            patient = Patient.objects.get(pk=patient_id)
             treatment = None
 
         # Создаем новую запись
@@ -682,18 +857,19 @@ def create_record(request, format=None):
         return Response("Процедура не найдена.", status=status.HTTP_404_NOT_FOUND)
     except Doctor.DoesNotExist:
         return Response("Доктор не найден.", status=status.HTTP_404_NOT_FOUND)
-    except Patient.DoesNotExist:
-        return Response("Пациент не найден.", status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         return Response(f"Ошибка при создании записи: {str(e)}", status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@swagger_auto_schema(tags=["POST-запросы"], method='post', operation_summary="Создание нового лечения с диагнозом", 
+# POST - создание нового лечения доктором
+@swagger_auto_schema(
+    tags=["POST-запросы"],
+    method='post',
+    operation_summary="Создание нового лечения с диагнозом",
     request_body=openapi.Schema(
         type=openapi.TYPE_OBJECT,
-        required=['doctor_id', 'patient_id', 'diagnose_name', 'diagnose_description', 'description'],
+        required=['patient_id', 'diagnose_name', 'diagnose_description', 'description'],
         properties={
-            'doctor_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID доктора'),
             'patient_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID пациента'),
             'diagnose_name': openapi.Schema(type=openapi.TYPE_STRING, description='Название диагноза'),
             'diagnose_description': openapi.Schema(type=openapi.TYPE_STRING, description='Описание диагноза'),
@@ -714,18 +890,38 @@ def create_treatment(request, format=None):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     # Получаем данные из запроса
-    doctor_id = serializer.validated_data.get('doctor_id')
     patient_id = serializer.validated_data.get('patient_id')
     diagnose_name = serializer.validated_data.get('diagnose_name')
     diagnose_description = serializer.validated_data.get('diagnose_description')
     description = serializer.validated_data.get('description')
 
-    if not doctor_id or not patient_id or not diagnose_name or not diagnose_description or not description:
+    if not patient_id or not diagnose_name or not diagnose_description or not description:
         return Response("Необходимые данные отсутствуют.", status=status.HTTP_400_BAD_REQUEST)
-    
+
+    # Получаем session_id из cookie
+    session_id = request.COOKIES.get('session_id')
+    if not session_id:
+        return Response("Отсутствует session_id в cookie.", status=status.HTTP_400_BAD_REQUEST)
+
+    # Получаем email пользователя из session_storage
+    user_email = session_storage.get(session_id)
+    if not user_email:
+        return Response("Не удалось определить пользователя по session_id.", status=status.HTTP_400_BAD_REQUEST)
+
+    # Получаем объект пользователя
     try:
-        # Получаем объекты доктора и пациента
-        doctor = Doctor.objects.get(pk=doctor_id)
+        user = User.objects.get(email=user_email)
+    except User.DoesNotExist:
+        return Response("Пользователь не найден.", status=status.HTTP_404_NOT_FOUND)
+
+    # Получаем объект доктора
+    try:
+        doctor = Doctor.objects.get(user=user)
+    except Doctor.DoesNotExist:
+        return Response("Доктор не найден.", status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        # Получаем объект пациента
         patient = Patient.objects.get(pk=patient_id)
 
         # Создаем новый диагноз
@@ -740,13 +936,11 @@ def create_treatment(request, format=None):
             patient=patient,
             diagnose=diagnose,
             status=1,  # Устанавливаем статус "В процессе"
-            date_appointment=datetime.now(),  # Устанавливаем текущую дату и время
+            date_creation=datetime.now(),  # Устанавливаем текущую дату и время
             description=description
         )
 
         return Response({"message": "Лечение успешно создано"}, status=status.HTTP_201_CREATED)
-    except Doctor.DoesNotExist:
-        return Response("Доктор не найден.", status=status.HTTP_404_NOT_FOUND)
     except Patient.DoesNotExist:
         return Response("Пациент не найден.", status=status.HTTP_404_NOT_FOUND)
     except Exception as e:

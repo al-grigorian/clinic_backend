@@ -53,12 +53,12 @@ urlpatterns = [
     #path('patients/', views.get_patients, name='patients-list'), # Получение списка всех пациентов
 
     path('records/by-admin/', views.get_pending_records, name='get_pending_records'), # Получение списка записей со статусом "Ожидание подтверждения"
-    path('records/by-patient/', views.get_records_by_patient, name='get_records_by_patient'), # Получение списка записей пациента со статусом "Подтверждено" и "Ожидание подтверждения"
-    path('records/by_doctor/', views.get_records_by_doctor, name='get_records_by_doctor'), # Получение списка записей врача со статусом "Ожидание подтверждения"
-    path('treatments/by_patient/', views.get_treatments_by_patient, name='get_treatments_by_patient'), # Получение списка лечений конкретного пациента
+    path('records/by-patient/', views.get_records_by_patient, name='get_records_by_patient'), # Получение списка всех записей пациента с фильтром по статусу. Если статус не передан в параметре, по умолчанию выведет список записей со статусом 'Ожидание подтверждения' и 'Подтверждено'
+    path('records/by-doctor/', views.get_records_by_doctor, name='get_records_by_doctor'), # Получение списка всех записей врача со статусом "Подтверждено"
+    path('treatments/by-patient/', views.get_treatments_by_patient, name='get_treatments_by_patient'), # Получение списка лечений пациента
+    path('treatments/by-doctor/', views.get_treatments_by_doctor, name='get_treatments_by_doctor'), # Получение списка лечений врача со статусом 'В процессе'
     path('medicaments/by-patient/', views.get_medicaments_by_patient, name='get_medicaments_by_treatment'),  # Получение списка медикаментов пациента
     path('patients/snapshots/', views.get_patient_snapshots, name='get-patient-snapshots'), # Получение списка рентген снимов пациента
-    # получение лечений врача со статусом "В процессе"
 
     # PUT
     path('records/update-by-doctor/<int:record_id>/', views.update_record_by_doctor, name='update_record_by_doctor'),  # Изменение статуса записи врачом на "Завершено"
@@ -69,9 +69,9 @@ urlpatterns = [
 
     # POST
     path('api-auth/', include('rest_framework.urls', namespace='rest_framework')),
-    path('login/',  views.login_view, name='login'), # Авторизация
-    path('logout/', views.logout_view, name='logout'), # Выход
-    path('create/', views.create, name='create'), # Регистрация
+    path('login/',  views.login, name='login'), # Авторизация
+    path('logout/', views.logout, name='logout'), # Выход
+    path('create_user/', views.create_user, name='create-user'), # Регистрация
     path('create_doctor/', views.create_doctor, name='create-doctor'), # Создание доктора
     path('doctors/rate/', views.update_doctor_rating, name='update-doctor-rating'),  # Добавление оценки доктору
     path('create_record/', views.create_record, name='create-record'), # Создание новой записи
