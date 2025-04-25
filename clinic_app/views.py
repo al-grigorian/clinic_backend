@@ -402,6 +402,56 @@ def get_patient_snapshots(request):
     return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+@swagger_auto_schema(
+    tags=["GET-запросы"], 
+    method='get', 
+    operation_summary="Получение информации о пользователе",
+    operation_description="Возвращает данные пользователя по его сессии (cookie session_id).",
+    responses={
+        200: openapi.Response(
+            description="Успешный запрос",
+            schema=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "user_id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    "email": openapi.Schema(type=openapi.TYPE_STRING),
+                    "phone_number": openapi.Schema(type=openapi.TYPE_STRING),
+                    "is_admin": openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                    "is_doctor": openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                    "is_patient": openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                }
+            )
+        ),
+        400: 'Bad Request - Некорректные данные',
+        403: 'Forbidden - Сессия не найдена',
+        404: 'Not Found - Пользователь не найден',
+    }
+)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def user_info(request):
+    try:
+        ssid = request.COOKIES["session_id"]
+        if session_storage.exists(ssid):
+            email = session_storage.get(ssid).decode('utf-8')
+            user = User.objects.get(email=email)
+            user_data = {
+                "user_id": user.id,
+                "email": user.email,
+                "phone_number": user.phone_number,
+                "is_admin": user.is_admin,
+                "is_doctor": user.is_doctor,
+                "is_patient": user.is_patient
+            }
+            return Response(user_data, status=status.HTTP_200_OK)
+        else:
+            return Response({'status': 'Error', 'message': 'Session does not exist'}, status=status.HTTP_403_FORBIDDEN)
+    except KeyError:
+        return Response({'status': 'Error', 'message': 'Cookies are not transmitted'}, status=status.HTTP_400_BAD_REQUEST)
+    except User.DoesNotExist:
+        return Response({'status': 'Error', 'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+
 #########################################################################################################
 # ------------------------------------------------- PUT -------------------------------------------------
 #########################################################################################################
@@ -604,6 +654,7 @@ def create_user(request):
         response.set_cookie("session_id", random_key)
         return response
     return Response({'status': 'Error', 'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
 
 # Регистрация пользователя (врач)
 @swagger_auto_schema(tags=["POST-запросы"], method='post', request_body=DoctorSerializer, operation_summary="Создание доктора администратором")
