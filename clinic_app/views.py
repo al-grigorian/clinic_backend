@@ -452,6 +452,38 @@ def user_info(request):
         return Response({'status': 'Error', 'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
     
 
+# GET - список рентген снимов пациента
+@swagger_auto_schema(tags=["GET-запросы"], method='get', operation_summary="Получение снимков пациента",
+    responses={
+        200: SnapshotSerializer(many=True),
+        400: 'Bad Request',
+        403: 'Forbidden',
+        404: 'Not Found',
+})
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_patient_3D(request):
+    if "session_id" in request.COOKIES:
+        ssid = request.COOKIES["session_id"]
+    else:
+        return HttpResponseForbidden('Сессия не найдена')
+
+    try:
+        email = session_storage.get(ssid).decode('utf-8')
+        user = User.objects.get(email=email)
+    except (User.DoesNotExist, AttributeError):
+        return Response({"error": "Пользователь не найден."}, status=status.HTTP_404_NOT_FOUND)
+
+    if not user.is_patient:
+        return Response({"error": "Пользователь не пациент."}, status=status.HTTP_400_BAD_REQUEST)
+
+    patient = Patient.objects.get(user=user)
+    snapshots = Snapshot.objects.filter(record__patient=patient, type=1)  # 1 - это тип "3D модель"
+    serializer = SnapshotSerializer(snapshots, many=True)
+
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
 #########################################################################################################
 # ------------------------------------------------- PUT -------------------------------------------------
 #########################################################################################################

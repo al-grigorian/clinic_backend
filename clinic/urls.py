@@ -59,6 +59,7 @@ urlpatterns = [
     path('treatments/by-doctor/', views.get_treatments_by_doctor, name='get_treatments_by_doctor'), # Получение списка лечений врача со статусом 'В процессе'
     path('medicaments/by-patient/', views.get_medicaments_by_patient, name='get_medicaments_by_treatment'),  # Получение списка медикаментов пациента
     path('patients/snapshots/', views.get_patient_snapshots, name='get-patient-snapshots'), # Получение списка рентген снимов пациента
+    path('patients/3d-snapshots/', views.get_patient_snapshots, name='get-patient-snapshots'),
     path('user_info', views.user_info, name='user_info'),
 
     # PUT
