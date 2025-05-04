@@ -29,6 +29,14 @@ from drf_yasg import openapi
 
 session_storage = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT)
 
+from datetime import time, datetime, timedelta
+from django.db.models import Q
+
+# Константы для работы с временными слотами
+WORKING_HOURS_START = time(10, 0)  # 10:00
+WORKING_HOURS_END = time(19, 0)    # 19:00
+PROCEDURE_DURATION = timedelta(minutes=90)  # 1.5 часа
+MAX_BOOKING_DAYS = 14  # 2 недели вперед
 
 #########################################################################################################
 # ------------------------------------------------- GET -------------------------------------------------
@@ -290,7 +298,7 @@ def get_treatments_by_patient(request, format=None):
     patient = Patient.objects.get(user=user)
     treatments = Treatment.objects.filter(patient=patient).order_by('status')
 
-    serializer = TreatmentSerializer(treatments, many=True)
+    serializer = SimpleTreatmentSerializer(treatments, many=True)
     return Response(serializer.data, status=status.HTTP_200_OK)
 
 
@@ -323,9 +331,8 @@ def get_treatments_by_doctor(request, format=None):
     doctor = Doctor.objects.get(user=user)
     treatments = Treatment.objects.filter(doctor=doctor, status=1)  # 1 соответствует статусу "В процессе"
 
-    serializer = TreatmentSerializer(treatments, many=True)
+    serializer = SimpleTreatmentSerializer(treatments, many=True)
     return Response(serializer.data, status=status.HTTP_200_OK)
-
 
 
 # GET - список медикаментов пациента
@@ -688,8 +695,33 @@ def create_user(request):
     return Response({'status': 'Error', 'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 
-# Регистрация пользователя (врач)
-@swagger_auto_schema(tags=["POST-запросы"], method='post', request_body=DoctorSerializer, operation_summary="Создание доктора администратором")
+# Регистрация врача
+@swagger_auto_schema(
+    tags=["POST-запросы"],
+    method='post',
+    operation_summary="Создание доктора администратором",
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        required=['email', 'phone_number', 'password', 'is_admin', 'is_doctor', 'is_patient', 'specialization', 'name', 'surname', 'patronymic', 'image_path'],
+        properties={
+            'email': openapi.Schema(type=openapi.TYPE_STRING, format='email'),
+            'phone_number': openapi.Schema(type=openapi.TYPE_STRING),
+            'password': openapi.Schema(type=openapi.TYPE_STRING, format='password'),
+            'is_admin': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+            'is_doctor': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+            'is_patient': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+            'specialization': openapi.Schema(type=openapi.TYPE_STRING),
+            'name': openapi.Schema(type=openapi.TYPE_STRING),
+            'surname': openapi.Schema(type=openapi.TYPE_STRING),
+            'patronymic': openapi.Schema(type=openapi.TYPE_STRING),
+            'image_path': openapi.Schema(type=openapi.TYPE_STRING, format='text'),
+        },
+    ),
+    responses={
+        201: "Успешная регистрация",
+        400: "Ошибка валидации или пользователь уже существует",
+    }
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def create_doctor(request):
@@ -703,8 +735,9 @@ def create_doctor(request):
         'is_doctor': request.data['is_doctor'],
         'is_patient': request.data['is_patient'],
     }
-    print(user_data)
+
     serializer = UserSerializer(data=user_data)
+
     if serializer.is_valid():
         print(serializer.data)
         user_key = User.objects.create_user(email=serializer.data['email'],
@@ -713,26 +746,22 @@ def create_doctor(request):
                                             is_admin=serializer.data['is_admin'],
                                             is_doctor=serializer.data['is_doctor'],
                                             is_patient=serializer.data['is_patient'])
-        print(request.data['is_doctor'])
-        if request.data['is_doctor']:
-            specialization_name = request.data['specialization']
-            specialization, created = Specialization.objects.get_or_create(name=specialization_name)
+        specialization_name = request.data['specialization']
+        specialization, created = Specialization.objects.get_or_create(name=specialization_name)
 
-            Doctor.objects.create(user=user_key,
-                                    specialization=specialization,
-                                    name=request.data['name'], 
-                                    surname=request.data['surname'],
-                                    patronymic=request.data['patronymic'],
-                                    image_path=request.data['image_path'])
-            user_data['specialization'] = specialization.name
-            user_data['name'] = request.data['name']
-            user_data['surname'] = request.data['surname']
-            user_data['patronymic'] = request.data['patronymic']
-            user_data['image_path'] = request.data['image_path']
-        #random_key = str(uuid.uuid4())
-        #session_storage.set(random_key, serializer.data['email'])
+        Doctor.objects.create(user=user_key,
+                                specialization=specialization,
+                                name=request.data['name'], 
+                                surname=request.data['surname'],
+                                patronymic=request.data['patronymic'],
+                                image_path=request.data['image_path'])
+        user_data['specialization'] = specialization.name
+        user_data['name'] = request.data['name']
+        user_data['surname'] = request.data['surname']
+        user_data['patronymic'] = request.data['patronymic']
+        user_data['image_path'] = request.data['image_path']
         response = Response(user_data, status=status.HTTP_201_CREATED)
-        #response.set_cookie("session_id", random_key)
+
         return response
     return Response({'status': 'Error', 'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1028,3 +1057,115 @@ def create_treatment(request, format=None):
         return Response("Пациент не найден.", status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         return Response(f"Ошибка при создании лечения: {str(e)}", status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@swagger_auto_schema(
+    tags=["GET-запросы"],
+    method='get',
+    operation_summary="Получение свободных слотов для записи к врачу",
+    responses={
+        200: openapi.Response(
+            description="Свободные слоты для записи",
+            schema=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                additional_properties=openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_DATETIME)
+                )
+            )
+        ),
+        404: "Доктор не найден"
+    }
+)
+@api_view(['GET'])
+def get_available_slots(request, doctor_id):
+    try:
+        doctor = Doctor.objects.get(pk=doctor_id)
+    except Doctor.DoesNotExist:
+        return Response({"error": "Доктор не найден"}, status=status.HTTP_404_NOT_FOUND)
+
+    # Получаем текущую дату и время
+    now = datetime.now()
+    today = now.date()
+    
+    # Определяем диапазон дат для поиска слотов (сегодня + 2 недели)
+    end_date = today + timedelta(days=MAX_BOOKING_DAYS)
+    
+    # Генерируем список всех возможных слотов
+    all_slots = generate_all_slots(today, end_date)
+    
+    # Получаем занятые слоты для этого врача
+    booked_slots = get_booked_slots(doctor, today, end_date)
+    
+    # Фильтруем свободные слоты
+    available_slots = filter_available_slots(all_slots, booked_slots)
+    
+    # Группируем слоты по дням для удобства отображения
+    grouped_slots = group_slots_by_date(available_slots)
+    
+    return Response(grouped_slots, status=status.HTTP_200_OK)
+
+def generate_all_slots(start_date, end_date):
+    """Генерирует все возможные слоты в рабочее время для каждого дня"""
+    slots = []
+    current_date = start_date
+    
+    while current_date <= end_date:
+        # Пропускаем выходные (суббота и воскресенье)
+        if current_date.weekday() < 5:  # 0-4 = пн-пт
+            current_time = datetime.combine(current_date, WORKING_HOURS_START)
+            end_time = datetime.combine(current_date, WORKING_HOURS_END)
+            
+            while current_time + PROCEDURE_DURATION <= end_time:
+                slots.append(current_time)
+                current_time += PROCEDURE_DURATION
+                
+        current_date += timedelta(days=1)
+    
+    return slots
+
+def get_booked_slots(doctor, start_date, end_date):
+    """Получает занятые слоты для данного врача в указанном диапазоне дат"""
+    # Получаем все подтвержденные записи для этого врача в указанном диапазоне
+    records = Record.objects.filter(
+        doctor=doctor,
+        status__in=[2],  # Подтвержденные и завершенные записи
+        start_time__date__gte=start_date,
+        start_time__date__lte=end_date
+    ).order_by('start_time')
+    
+    # Формируем список занятых слотов
+    booked_slots = []
+    for record in records:
+        booked_slots.append(record.start_time)
+    
+    return booked_slots
+
+def filter_available_slots(all_slots, booked_slots):
+    """Фильтрует свободные слоты, исключая занятые и прошедшие время"""
+    now = datetime.now()
+    available_slots = []
+    
+    booked_slots_set = {slot.replace(tzinfo=None) for slot in booked_slots}
+    
+    for slot in all_slots:
+        # Исключаем слоты, которые уже прошли
+        if slot > now and slot not in booked_slots_set:
+            available_slots.append(slot)
+    
+    return available_slots
+
+def group_slots_by_date(slots):
+    """Группирует слоты по датам для удобного отображения"""
+    grouped = {}
+    
+    for slot in sorted(slots):
+        date_str = slot.strftime('%Y-%m-%d')
+        time_str = slot.strftime('%H:%M')
+        
+        if date_str not in grouped:
+            grouped[date_str] = []
+        
+        grouped[date_str].append(time_str)
+    
+    return grouped

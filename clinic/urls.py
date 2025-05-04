@@ -46,6 +46,7 @@ urlpatterns = [
     path('doctors/', views.get_doctors, name='doctors-list'), # Получение списка всех врачей
     path('procedures/', views.get_procedures, name='procedures-list'), # Получение списка всех процедур
     path('doctors/by-procedure/<int:procedure_id>/', views.get_doctors_by_procedure, name='get_doctors_by_procedure'), # Получение списка врачей, выполняющих конкретную выбранную процедуру
+    path('doctors/<int:doctor_id>/available-slots/', views.get_available_slots, name='available-slots'),
 
     #path('specializations/', views.get_specializations, name='specializations-list'), # Получение списка всех специализаций
     #path('procedures/<int:procedure_id>/', views.get_procedure_by_id, name='get-procedure-by-id'), # Получение процедуры по ID
